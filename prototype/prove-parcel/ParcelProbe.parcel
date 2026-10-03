@@ -1,0 +1,16 @@
+{
+  "GeneralSettings": {
+    "NetProjectPath": "ParcelProbe.csproj",
+    "PackageName": "ParcelProbe",
+    "ApplicationName": "ParcelProbe",
+    "Version": "0.1.0",
+    "Company": "fanioz"
+  },
+  "PublishSettings": {
+    "Configuration": "Release",
+    "PublishSelfContained": true
+  },
+  "Win32Settings": {
+    "SigningType": "None"
+  }
+}
