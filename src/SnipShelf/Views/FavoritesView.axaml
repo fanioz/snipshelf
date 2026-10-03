@@ -1,0 +1,14 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SnipShelf.ViewModels"
+             x:Class="SnipShelf.Views.FavoritesView"
+             x:DataType="vm:FavoritesViewModel">
+
+    <StackPanel Spacing="8" Margin="24,16">
+        <TextBlock Text="{Binding Title}" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock Text="Starred snippets will collect here for quick access."
+                   Opacity="0.7"
+                   TextWrapping="Wrap" />
+    </StackPanel>
+
+</UserControl>
