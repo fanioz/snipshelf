@@ -4,11 +4,6 @@ using SnipShelf.Services;
 
 namespace SnipShelf.ViewModels;
 
-public sealed class VaultViewModel : ViewModelBase
-{
-    public string Title => "Vault";
-}
-
 public sealed class FavoritesViewModel : ViewModelBase
 {
     public string Title => "Favorites";

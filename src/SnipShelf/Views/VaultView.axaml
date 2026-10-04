@@ -1,14 +1,301 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SnipShelf.ViewModels"
+             xmlns:models="using:SnipShelf.Models"
              x:Class="SnipShelf.Views.VaultView"
-             x:DataType="vm:VaultViewModel">
+             x:DataType="vm:VaultViewModel"
+             x:Name="Root"
+             Loaded="OnLoaded">
 
-    <StackPanel Spacing="8" Margin="24,16">
-        <TextBlock Text="{Binding Title}" FontSize="24" FontWeight="SemiBold" />
-        <TextBlock Text="Your snippets and prompts will live here."
-                   Opacity="0.7"
-                   TextWrapping="Wrap" />
-    </StackPanel>
+    <Grid ColumnDefinitions="340,Auto,*">
+        <!-- Left Pane: Search, Filters, List -->
+        <Grid Grid.Column="0" RowDefinitions="Auto,Auto,Auto,*" Margin="16,16,12,16">
+            <!-- Header & Search -->
+            <StackPanel Grid.Row="0" Spacing="8" Margin="0,0,0,8">
+                <TextBlock Text="Vault" FontSize="22" FontWeight="SemiBold" />
+                <TextBox Text="{Binding SearchQuery, Mode=TwoWay}"
+                         Watermark="Search snippets, prompts, or tags…" />
+            </StackPanel>
+
+            <!-- Filter Chips -->
+            <ScrollViewer Grid.Row="1"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Disabled"
+                          Margin="0,0,0,8">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Button Content="All"
+                            Command="{Binding SelectAllCommand}"
+                            Padding="10,4" />
+
+                    <Button Content="★ Favorites"
+                            Command="{Binding SelectFavoritesCommand}"
+                            Padding="10,4" />
+
+                    <ItemsControl ItemsSource="{Binding VisibleTags}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="6" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FilterTagViewModel">
+                                <Button Command="{Binding #Root.DataContext.SelectTagCommand}"
+                                        CommandParameter="{Binding Id}"
+                                        Padding="8,4">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="#" Opacity="0.6" />
+                                        <TextBlock Text="{Binding Name}" />
+                                        <TextBlock Text="{Binding Count, StringFormat='({0})'} " Opacity="0.6" FontSize="11" />
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Button Content="More…"
+                            IsVisible="{Binding HasMoreTags}"
+                            Command="{Binding ExpandTagsCommand}"
+                            Padding="8,4" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Sort Controls -->
+            <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding Snippets.Count, StringFormat='{}{0} snippets'}"
+                           VerticalAlignment="Center"
+                           Opacity="0.6"
+                           FontSize="12" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <TextBlock Text="Sort:" VerticalAlignment="Center" FontSize="12" Opacity="0.7" />
+                    <ComboBox ItemsSource="{Binding SortOptions}"
+                              SelectedValue="{Binding SortMode, Mode=TwoWay}"
+                              SelectedValueBinding="{Binding Value}"
+                              DisplayMemberBinding="{Binding Label}"
+                              FontSize="12"
+                              MinHeight="26"
+                              Padding="6,2" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Content Area: ListBox or Visual States -->
+            <Panel Grid.Row="3">
+                <!-- Results List -->
+                <ListBox ItemsSource="{Binding Snippets}"
+                         SelectedItem="{Binding SelectedSnippet, Mode=TwoWay}"
+                         IsVisible="{Binding HasResults}"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <VirtualizingStackPanel />
+                        </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SnippetListItemViewModel">
+                            <Border Padding="6,8" Margin="0,2">
+                                <Grid RowDefinitions="Auto,Auto,Auto">
+                                    <!-- Title and Star -->
+                                    <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0"
+                                                   Text="{Binding Title}"
+                                                   FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="★"
+                                                   IsVisible="{Binding IsFavorite}"
+                                                   Foreground="#FFD700"
+                                                   Margin="4,0,0,0" />
+                                    </Grid>
+
+                                    <!-- Body Preview -->
+                                    <TextBlock Grid.Row="1"
+                                               Text="{Binding Preview}"
+                                               FontSize="12"
+                                               Opacity="0.7"
+                                               MaxLines="2"
+                                               TextWrapping="Wrap"
+                                               TextTrimming="CharacterEllipsis"
+                                               Margin="0,3" />
+
+                                    <!-- Metadata Row: Tags and Timestamp -->
+                                    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,2,0,0">
+                                        <ItemsControl Grid.Column="0" ItemsSource="{Binding Tags}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal" Spacing="4" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="models:Tag">
+                                                    <Border Background="{DynamicResource ButtonBackgroundSubtle}"
+                                                            CornerRadius="3"
+                                                            Padding="4,1">
+                                                        <TextBlock Text="{Binding Name, StringFormat='#{0}'}"
+                                                                   FontSize="10"
+                                                                   Opacity="0.8" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{Binding RelativeTime}"
+                                                   FontSize="11"
+                                                   Opacity="0.5"
+                                                   VerticalAlignment="Center" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+
+                <!-- Loading State -->
+                <StackPanel IsVisible="{Binding IsLoading}"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center"
+                            Spacing="8">
+                    <ProgressBar IsIndeterminate="True" Width="120" />
+                    <TextBlock Text="Loading snippets…" Opacity="0.6" HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <!-- Empty Vault State -->
+                <StackPanel IsVisible="{Binding IsEmptyVault}"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center"
+                            Spacing="12"
+                            Margin="16">
+                    <TextBlock Text="Your vault is empty"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Create your first snippet or import a JSON backup."
+                               Opacity="0.7"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center" />
+                    <Button Content="+ New snippet"
+                            HorizontalAlignment="Center"
+                            IsEnabled="False" />
+                </StackPanel>
+
+                <!-- No Search Results State -->
+                <StackPanel IsVisible="{Binding IsNoResults}"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center"
+                            Spacing="10"
+                            Margin="16">
+                    <TextBlock Text="{Binding NoResultsText}"
+                               FontSize="14"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               Opacity="0.8" />
+                    <Button Content="Clear filters"
+                            Command="{Binding ClearFiltersCommand}"
+                            HorizontalAlignment="Center" />
+                </StackPanel>
+            </Panel>
+        </Grid>
+
+        <!-- Splitter separator -->
+        <GridSplitter Grid.Column="1" Width="1" Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+        <!-- Right Pane: Detail View -->
+        <Grid Grid.Column="2" Margin="20,16,20,16" x:Name="DetailPane">
+            <!-- Selected Detail -->
+            <ScrollViewer IsVisible="{Binding HasSelection}"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="16">
+                    <!-- Title & Header Actions -->
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0"
+                                   Text="{Binding SelectedSnippet.Title}"
+                                   FontSize="22"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="★ Favorite"
+                                       IsVisible="{Binding SelectedSnippet.IsFavorite}"
+                                       Foreground="#FFD700"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Metadata Badges: Kind, Tags, Updated Time -->
+                    <WrapPanel Orientation="Horizontal">
+                        <!-- Kind Badge -->
+                        <Border Background="{DynamicResource AccentButtonBackground}"
+                                CornerRadius="4"
+                                Padding="8,2"
+                                Margin="0,0,8,4">
+                            <TextBlock Text="{Binding SelectedSnippet.KindLabel}"
+                                       Foreground="{DynamicResource AccentButtonForeground}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold" />
+                        </Border>
+
+                        <!-- Tags -->
+                        <ItemsControl ItemsSource="{Binding SelectedSnippet.Tags}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:Tag">
+                                    <Border Background="{DynamicResource ButtonBackgroundSubtle}"
+                                            CornerRadius="4"
+                                            Padding="6,2"
+                                            Margin="0,0,6,4">
+                                        <TextBlock Text="{Binding Name, StringFormat='#{0}'}"
+                                                   FontSize="11" />
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <!-- Timestamp -->
+                        <TextBlock Text="{Binding SelectedSnippet.UpdatedUtc, StringFormat='Updated {0:g}'}"
+                                   Opacity="0.6"
+                                   FontSize="12"
+                                   VerticalAlignment="Center"
+                                   Margin="8,0,0,4" />
+                    </WrapPanel>
+
+                    <!-- Divider -->
+                    <Rectangle Height="1" Fill="{DynamicResource DividerStrokeColorDefaultBrush}" />
+
+                    <!-- Monospaced Snippet Body -->
+                    <TextBox Text="{Binding SelectedSnippet.Body}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas, Cascadia Code, Menlo, Courier New, monospace"
+                             FontSize="13"
+                             MinHeight="250"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Padding="0" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- No Selection State -->
+            <StackPanel IsVisible="{Binding !HasSelection}"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Center"
+                        Spacing="8">
+                <TextBlock Text="Select a snippet"
+                           FontSize="16"
+                           FontWeight="SemiBold"
+                           HorizontalAlignment="Center"
+                           Opacity="0.5" />
+                <TextBlock Text="Choose a snippet from the list to view its full details."
+                           FontSize="13"
+                           Opacity="0.4"
+                           HorizontalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+    </Grid>
 
 </UserControl>
