@@ -17,6 +17,7 @@ public sealed class FrameNavigationServiceTests
     {
         var services = new ServiceCollection();
         services.AddSingleton<ISettingsService>(new FakeSettingsService());
+        services.AddSingleton<ISnippetRepository>(new FakeSnippetRepository());
         foreach (var definition in ShellPageMap.Definitions)
         {
             services.AddTransient(definition.ViewModelType);
@@ -77,7 +78,7 @@ public sealed class FrameNavigationServiceTests
         Assert.Equal(0, frame.BackStackDepth);
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void GetPage_EveryShellPage_ReturnsItsViewWiredToItsViewModel()
     {
         var navigation = CreateService();
@@ -92,7 +93,7 @@ public sealed class FrameNavigationServiceTests
         }
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void GetPage_TwiceForSamePage_CreatesDistinctInstances()
     {
         var navigation = CreateService();
@@ -112,7 +113,7 @@ public sealed class FrameNavigationServiceTests
         Assert.Null(navigation.GetPage(typeof(string)));
     }
 
-    [Fact]
+    [AvaloniaFact]
     public void GetPageFromObject_WrapsTheGivenViewModel()
     {
         var navigation = CreateService();

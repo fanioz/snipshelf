@@ -31,6 +31,11 @@ public partial class App : Application
         ApplyTheme(settings.Load().Theme);
         settings.Changed += (_, current) => ApplyTheme(current.Theme);
 
+        // The Vault is empty until the schema exists; blocking here keeps the first Vault
+        // render from racing the data layer. It is milliseconds on a cold start and runs
+        // before any window is shown.
+        services.GetRequiredService<DatabaseBootstrapper>().InitializeAsync().GetAwaiter().GetResult();
+
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var window = new MainWindow
@@ -58,6 +63,12 @@ public partial class App : Application
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "SnipShelf");
         services.AddSingleton<ISettingsService>(new SettingsService(dataFolder));
+
+        services.AddSingleton(new VaultDatabase(dataFolder));
+        services.AddSingleton<DatabaseBootstrapper>();
+        services.AddSingleton<ISnippetRepository>(sp => new SqliteSnippetRepository(
+            sp.GetRequiredService<VaultDatabase>(),
+            TimeProvider.System));
 
         // Page view models are transient: the Frame rebuilds a page on every visit, and a
         // page that outlived its visit would resurrect stale scroll or selection state.
