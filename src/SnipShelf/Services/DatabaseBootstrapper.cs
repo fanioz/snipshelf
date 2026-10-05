@@ -3,19 +3,18 @@ using Microsoft.Data.Sqlite;
 namespace SnipShelf.Services;
 
 /// <summary>
-/// Brings the vault database up to date on every launch: creates it if it is missing, applies
-/// the schema, and — only the very first time — inserts the seeds.
+/// Creates the vault database if it is missing and applies its schema on creation. There is
+/// no migration mechanism yet: an existing vault keeps the shape it was created with, and —
+/// only the very first time — gets the seeds inserted.
 /// </summary>
 public sealed class DatabaseBootstrapper(
     VaultDatabase database,
     ISettingsService settings)
 {
-    /// <summary>Bumped whenever the DDL in <see cref="SchemaSql"/> changes shape.</summary>
-    public const int SchemaVersion = 1;
-
     /// <summary>
     /// Appendix B of the PRD, verbatim. Everything is IF NOT EXISTS so a launch against an
-    /// existing vault is a no-op rather than an error.
+    /// existing vault is a no-op rather than an error; the DDL can never alter a table that
+    /// already exists.
     /// </summary>
     private const string SchemaSql = """
         CREATE TABLE IF NOT EXISTS Meta (Key TEXT PRIMARY KEY, Value TEXT NOT NULL);
@@ -54,19 +53,9 @@ public sealed class DatabaseBootstrapper(
     private void ApplySchema()
     {
         using var connection = database.OpenConnection();
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText = SchemaSql;
-            command.ExecuteNonQuery();
-        }
-
-        using var version = connection.CreateCommand();
-        version.CommandText = """
-            INSERT INTO Meta (Key, Value) VALUES ('schema_version', @version)
-            ON CONFLICT (Key) DO UPDATE SET Value = excluded.Value;
-            """;
-        version.Parameters.AddWithValue("@version", SchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        version.ExecuteNonQuery();
+        using var command = connection.CreateCommand();
+        command.CommandText = SchemaSql;
+        command.ExecuteNonQuery();
     }
 
     /// <summary>

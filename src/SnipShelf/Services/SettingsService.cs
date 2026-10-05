@@ -7,6 +7,9 @@ public sealed class SettingsService : ISettingsService
 {
     private const string FileName = "settings.json";
 
+    // Serializes Load, LoadAsync and UpdateAsync against each other: without it a load that
+    // raced an in-flight update could publish an older disk snapshot, and the next update
+    // would then persist that stale snapshot and erase the completed change.
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private AppSettings _current = new();
 
@@ -27,13 +30,35 @@ public sealed class SettingsService : ISettingsService
 
     public AppSettings Load()
     {
-        var loaded = ReadFile() ?? new AppSettings();
-        Volatile.Write(ref _current, loaded);
-        return loaded.Clone();
+        // Synchronous wait on purpose: Load is the startup path and blocking here is fine,
+        // as long as we never mix it with the async gate API.
+        _writeGate.Wait();
+        try
+        {
+            var loaded = ReadFile() ?? new AppSettings();
+            Volatile.Write(ref _current, loaded);
+            return loaded.Clone();
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
     }
 
-    /// <inheritdoc cref="ISettingsService.Load"/>
-    public Task<AppSettings> LoadAsync() => Task.FromResult(Load());
+    public async Task<AppSettings> LoadAsync()
+    {
+        await _writeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            var loaded = await ReadFileAsync().ConfigureAwait(false) ?? new AppSettings();
+            Volatile.Write(ref _current, loaded);
+            return loaded.Clone();
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
 
     public async Task UpdateAsync(Action<AppSettings> mutate, CancellationToken cancellationToken = default)
     {
@@ -53,6 +78,8 @@ public sealed class SettingsService : ISettingsService
             _writeGate.Release();
         }
 
+        // Reached only when the write succeeded, so Changed never announces a change
+        // that did not make it to settings.json.
         Changed?.Invoke(this, Volatile.Read(ref _current).Clone());
     }
 
@@ -73,8 +100,28 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
+    private async Task<AppSettings?> ReadFileAsync()
+    {
+        try
+        {
+            if (!File.Exists(SettingsFilePath))
+            {
+                return null;
+            }
+
+            var json = await File.ReadAllTextAsync(SettingsFilePath).ConfigureAwait(false);
+            return AppSettingsSerializer.TryDeserialize(json, out var parsed) ? parsed : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An unreadable settings file is not worth refusing to start over.
+            return null;
+        }
+    }
+
     // Write to a sibling temp file and move it into place, so a crash or a full disk
-    // cannot leave a half-written settings.json behind.
+    // cannot leave a half-written settings.json behind. Failures propagate: callers must
+    // be able to tell that the change never reached the disk.
     private async Task WriteFileAsync(AppSettings settings, CancellationToken cancellationToken)
     {
         var temp = SettingsFilePath + ".tmp";
@@ -88,6 +135,7 @@ public sealed class SettingsService : ISettingsService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             TryDeleteTemp(temp);
+            throw;
         }
     }
 

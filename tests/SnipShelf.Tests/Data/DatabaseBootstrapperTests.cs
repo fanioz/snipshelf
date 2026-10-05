@@ -31,9 +31,9 @@ public sealed class DatabaseBootstrapperTests
         Assert.Equal(ExpectedTables, tables);
         var indexes = Query(vault.Database, "SELECT Name FROM sqlite_master WHERE Type = 'index' AND Name NOT LIKE 'sqlite_%' ORDER BY Name");
         Assert.Equal(["IX_Snippets_Updated"], indexes);
-        Assert.Equal(
-            [DatabaseBootstrapper.SchemaVersion.ToString()],
-            Query(vault.Database, "SELECT Value FROM Meta WHERE Key = 'schema_version'"));
+        // The Meta table holds exactly the seed marker: the DDL is create-only, so there is
+        // no schema version row for a migration mechanism that does not exist yet.
+        Assert.Equal(["true"], Query(vault.Database, "SELECT Value FROM Meta"));
     }
 
     [Fact]
@@ -141,6 +141,21 @@ public sealed class DatabaseBootstrapperTests
         await vault.Bootstrapper.InitializeAsync();
         Assert.Equal(FirstRunSeeds.All.Count, (await vault.Repository.SearchAsync()).Count);
         Assert.Equal(["true"], Query(vault.Database, "SELECT Value FROM Meta WHERE Key = 'seeds_inserted'"));
+    }
+
+    // The seed is meant to teach the regex, so the pattern itself must be strict semver:
+    // \d would also match Unicode digits and $ would tolerate a trailing newline.
+    [Fact]
+    public void FirstRunSeeds_SemverSnippet_PatternIsStrictSemver()
+    {
+        var body = FirstRunSeeds.All.Single(s => s.Title == "Regex: semver").Body;
+        var pattern = body.Split('\n')[0].TrimEnd('\r');
+
+        Assert.Matches(pattern, "1.2.3");
+        Assert.Matches(pattern, "1.2.3-beta.1+build.2");
+        Assert.DoesNotMatch(pattern, "01.2.3");
+        Assert.DoesNotMatch(pattern, "1.2.3\n4.5.6");
+        Assert.DoesNotMatch(pattern, "١.٢.٣");
     }
 
     private static List<string> Query(VaultDatabase database, string sql)

@@ -6,12 +6,15 @@ namespace SnipShelf.Tests.Support;
 /// <summary>In-memory settings: no disk, records every mutation for assertions.</summary>
 public sealed class FakeSettingsService : ISettingsService
 {
+    private AppSettings _current;
+
     public FakeSettingsService(AppSettings? initial = null)
     {
-        Current = initial ?? new AppSettings();
+        _current = (initial ?? new AppSettings()).Clone();
     }
 
-    public AppSettings Current { get; private set; }
+    /// <summary>A snapshot of the current settings. Mutating it has no effect.</summary>
+    public AppSettings Current => _current.Clone();
 
     public string DataFolder => "/fake/data";
 
@@ -33,11 +36,13 @@ public sealed class FakeSettingsService : ISettingsService
 
     public Task UpdateAsync(Action<AppSettings> mutate, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         Updates.Add(mutate);
-        var updated = Current.Clone();
+        var updated = _current.Clone();
         mutate(updated);
-        Current = updated;
-        Changed?.Invoke(this, Current.Clone());
+        _current = updated;
+        Changed?.Invoke(this, Current);
         return Task.CompletedTask;
     }
 }

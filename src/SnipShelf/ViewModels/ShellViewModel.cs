@@ -5,6 +5,7 @@ using SnipShelf.Models;
 using SnipShelf.Navigation;
 using SnipShelf.Services;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 
 namespace SnipShelf.ViewModels;
 
@@ -65,7 +66,25 @@ public partial class ShellViewModel : ViewModelBase
 
         if (!_restoring)
         {
-            _ = _settings.UpdateAsync(s => s.LastPage = newValue.Page);
+            _ = PersistLastPageAsync(newValue.Page);
+        }
+    }
+
+    // UpdateAsync throws on a failed write (disk full, permissions); the shell must observe
+    // that instead of leaking an unobserved task. Navigation itself is unaffected.
+    private async Task PersistLastPageAsync(ShellPage page)
+    {
+        try
+        {
+            await _settings.UpdateAsync(s => s.LastPage = page);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is a normal end for the write.
+        }
+        catch (Exception ex)
+        {
+            Trace.WriteLine($"Failed to persist last page: {ex.Message}");
         }
     }
 }

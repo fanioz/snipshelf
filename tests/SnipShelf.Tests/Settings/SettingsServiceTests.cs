@@ -89,6 +89,41 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(["settings.json"], files);
     }
 
+    // A write that never reached settings.json must be observable, not swallowed: callers
+    // get the exception, Changed stays quiet, and no half-finished .tmp file is left over.
+    // settings.json as a directory blocks the final move of the temp file into place.
+    [Fact]
+    public async Task UpdateAsync_WhenTheWriteFails_ThrowsAndRaisesNoChanged()
+    {
+        Directory.CreateDirectory(_folder);
+        Directory.CreateDirectory(Path.Combine(_folder, "settings.json"));
+
+        var service = CreateService();
+        var raised = 0;
+        service.Changed += (_, _) => raised++;
+
+        var failure = await Record.ExceptionAsync(
+            () => service.UpdateAsync(s => s.Theme = AppTheme.Dark));
+
+        Assert.True(failure is IOException or UnauthorizedAccessException,
+            $"Expected a write failure but got {failure?.GetType().Name ?? "null"}");
+        Assert.Equal(0, raised);
+        Assert.Empty(Directory.GetFiles(_folder, "*.tmp"));
+    }
+
+    // The in-memory choice still holds for the session even when the write failed.
+    [Fact]
+    public async Task UpdateAsync_WhenTheWriteFails_KeepsTheInMemoryChoice()
+    {
+        Directory.CreateDirectory(_folder);
+        Directory.CreateDirectory(Path.Combine(_folder, "settings.json"));
+        var service = CreateService();
+
+        await Record.ExceptionAsync(() => service.UpdateAsync(s => s.Theme = AppTheme.Dark));
+
+        Assert.Equal(AppTheme.Dark, service.Current.Theme);
+    }
+
     // A truncated or hand-mangled file falls back to defaults, but we never delete it:
     // the user may want to recover it.
     [Fact]

@@ -115,6 +115,23 @@ public sealed class SqliteSnippetRepositoryTests
         Assert.Equal("PowerShell", Assert.Single((await vault.Repository.GetAsync(second))!.Tags).Name);
     }
 
+    // The database's NOCASE folds ASCII only, so non-ASCII pairs like café/CAFÉ are matched
+    // in C# — one lookup miss there would otherwise become a second tag row.
+    [Fact]
+    public async Task UpsertAsync_TagNameDifferingOnlyByNonAsciiCase_ReusesTheExistingTag()
+    {
+        using var vault = await TempVault.CreateAsync();
+        var first = await vault.Repository.UpsertAsync(NewSnippet("One", "body") with { Tags = [new Tag(0, "café")] });
+        var second = await vault.Repository.UpsertAsync(NewSnippet("Two", "body") with { Tags = [new Tag(0, "CAFÉ")] });
+
+        var tag = Assert.Single(await vault.Repository.GetTagsWithCountsAsync());
+        Assert.Equal("café", tag.Name);
+        Assert.Equal(2, tag.SnippetCount);
+        Assert.Equal(
+            (await vault.Repository.GetAsync(first))!.Tags.Single().Id,
+            (await vault.Repository.GetAsync(second))!.Tags.Single().Id);
+    }
+
     [Fact]
     public async Task UpsertAsync_WithATagThatIsOnlyWhitespace_IgnoresIt()
     {
@@ -148,6 +165,7 @@ public sealed class SqliteSnippetRepositoryTests
         await vault.Repository.DeleteAsync(doomed);
 
         Assert.Equal("gone", Assert.Single((await vault.Repository.GetAsync(keeper))!.Tags).Name);
+        Assert.Equal(1, Assert.Single(await vault.Repository.GetTagsWithCountsAsync()).SnippetCount);
     }
 
     [Fact]
@@ -158,6 +176,36 @@ public sealed class SqliteSnippetRepositoryTests
         await vault.Repository.DeleteAsync(4242);
 
         Assert.Empty(await vault.Repository.SearchAsync());
+    }
+
+    // Term matching is OrdinalIgnoreCase in C#, so Unicode case pairs like café/CAFÉ count
+    // as the same letters — not just the ASCII ones SQL LIKE folds.
+    [Fact]
+    public async Task SearchAsync_TermDifferingOnlyByUnicodeCase_FindsTheSnippetByTitle()
+    {
+        using var vault = await TempVault.CreateAsync();
+        await vault.Repository.UpsertAsync(NewSnippet("café", "body"));
+
+        Assert.Equal("café", Assert.Single(await vault.Repository.SearchAsync("CAFÉ")).Title);
+    }
+
+    [Fact]
+    public async Task SearchAsync_TermMatchingATagNameByUnicodeCase_FindsTheTaggedSnippet()
+    {
+        using var vault = await TempVault.CreateAsync();
+        await vault.Repository.UpsertAsync(NewSnippet("Tagged", "body") with { Tags = [new Tag(0, "café")] });
+
+        Assert.Equal("Tagged", Assert.Single(await vault.Repository.SearchAsync("CAFÉ")).Title);
+    }
+
+    // % and _ are literal characters here: matching is C# Contains, not SQL LIKE.
+    [Fact]
+    public async Task SearchAsync_TermWithPercent_MatchesItLiterally()
+    {
+        using var vault = await TempVault.CreateAsync();
+        await vault.Repository.UpsertAsync(NewSnippet("Progress: 100% done", "body"));
+
+        Assert.Equal("Progress: 100% done", Assert.Single(await vault.Repository.SearchAsync("100%")).Title);
     }
 
     private static Snippet NewSnippet(string title, string body) => new()

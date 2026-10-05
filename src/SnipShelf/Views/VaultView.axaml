@@ -189,9 +189,6 @@
                                Opacity="0.7"
                                TextWrapping="Wrap"
                                TextAlignment="Center" />
-                    <Button Content="+ New snippet"
-                            HorizontalAlignment="Center"
-                            IsEnabled="False" />
                 </StackPanel>
 
                 <!-- No Search Results State -->

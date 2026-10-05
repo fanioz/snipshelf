@@ -63,6 +63,20 @@ public class AppSettingsSerializerTests
         Assert.Equal(ShellPage.Settings, settings.LastPage);
     }
 
+    // A quoted number is not a name: TryParse would happily read "1" as the member with
+    // that value, so a name-only match is what keeps the fallback honest. The other key
+    // doubles as the positive control that real names still deserialize.
+    [Fact]
+    public void TryDeserialize_NumericStringForEnum_FallsBackPerProperty()
+    {
+        const string json = """{"theme":"1","lastPage":"Settings"}""";
+
+        Assert.True(AppSettingsSerializer.TryDeserialize(json, out var settings));
+
+        Assert.Equal(AppTheme.System, settings.Theme);
+        Assert.Equal(ShellPage.Settings, settings.LastPage);
+    }
+
     [Fact]
     public void TryDeserialize_WrongJsonTypeForEnum_FallsBackPerProperty()
     {

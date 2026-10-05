@@ -14,6 +14,9 @@ public sealed partial class VaultViewModel : ViewModelBase
 {
     private readonly ISnippetRepository _repository;
     private CancellationTokenSource? _searchCts;
+    private int _searchVersion;
+    private Task? _debounceTask;
+    private bool _disposed;
     private bool _isInitialized;
     private bool? _vaultHasSnippets;
     private IReadOnlyList<Snippet> _allResults = [];
@@ -82,20 +85,38 @@ public sealed partial class VaultViewModel : ViewModelBase
         if (_isInitialized) return;
         _isInitialized = true;
 
+        // Registered in _searchCts so a query typed during startup cancels this initial
+        // search instead of racing it; linked so an external token still cancels too.
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _searchCts = cts;
+        var version = ++_searchVersion;
         try
         {
             State = VaultViewState.Loading;
-            await RefreshTagsAsync(cancellationToken);
-            await RefreshSnippetsAsync(cancellationToken);
+            await RefreshTagsAsync(cts.Token);
+            await RefreshSnippetsAsync(version, cts.Token);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_searchVersion == version)
         {
             _isInitialized = false;
             // Navigation away; clean up gracefully.
         }
+        catch (OperationCanceledException)
+        {
+            // A newer search superseded the initial one; it owns the state now.
+        }
         catch
         {
             State = VaultViewState.Error;
+        }
+        finally
+        {
+            if (ReferenceEquals(_searchCts, cts))
+            {
+                _searchCts = null;
+            }
+
+            cts.Dispose();
         }
     }
 
@@ -157,15 +178,15 @@ public sealed partial class VaultViewModel : ViewModelBase
         _searchCts?.Cancel();
         var cts = new CancellationTokenSource();
         _searchCts = cts;
-        _ = DebounceAndSearchAsync(cts);
+        _debounceTask = DebounceAndSearchAsync(++_searchVersion, cts);
     }
 
-    private async Task DebounceAndSearchAsync(CancellationTokenSource cts)
+    private async Task DebounceAndSearchAsync(int version, CancellationTokenSource cts)
     {
         try
         {
             await Task.Delay(TimeSpan.FromMilliseconds(200), cts.Token);
-            await RefreshSnippetsAsync(cts.Token);
+            await RefreshSnippetsAsync(version, cts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -182,17 +203,29 @@ public sealed partial class VaultViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Completes when the last spawned debounce-and-search task has settled. Exists so tests
+    /// can await a fire-and-forget search deterministically instead of sleeping through the
+    /// 200 ms debounce; production code never calls it. Public because the test project has
+    /// no InternalsVisibleTo into the app assembly.
+    /// </summary>
+    public Task WhenSearchSettlesAsync() => _debounceTask ?? Task.CompletedTask;
+
     private async Task RefreshTagsAsync(CancellationToken cancellationToken)
     {
         _allTags = await _repository.GetTagsWithCountsAsync(cancellationToken);
         UpdateVisibleTags();
     }
 
-    private async Task RefreshSnippetsAsync(CancellationToken cancellationToken)
+    private async Task RefreshSnippetsAsync(int version, CancellationToken cancellationToken)
     {
         try
         {
-            State = VaultViewState.Loading;
+            // A debounced refresh with results already on screen must not flash the spinner.
+            if (_allResults.Count == 0)
+            {
+                State = VaultViewState.Loading;
+            }
 
             var results = await _repository.SearchAsync(
                 term: string.IsNullOrWhiteSpace(SearchQuery) ? null : SearchQuery.Trim(),
@@ -201,6 +234,11 @@ public sealed partial class VaultViewModel : ViewModelBase
                 favoritesOnly: FavoritesOnly,
                 cancellationToken: cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (_searchVersion != version)
+            {
+                return; // A newer search superseded this one; applying would clobber it.
+            }
 
             _allResults = results;
 
@@ -222,7 +260,6 @@ public sealed partial class VaultViewModel : ViewModelBase
             }
 
             UpdateSnippetRows();
-            SelectedSnippet = null;
         }
         catch (OperationCanceledException)
         {
@@ -239,6 +276,9 @@ public sealed partial class VaultViewModel : ViewModelBase
 
     private void UpdateSnippetRows()
     {
+        // Rebuilding replaces every row object, so re-select the previous snippet by Id.
+        var previousId = SelectedSnippet?.Id;
+
         var rows = _allResults
             .Select(s => new SnippetListItemViewModel(s))
             .ToList();
@@ -248,6 +288,8 @@ public sealed partial class VaultViewModel : ViewModelBase
         {
             Snippets.Add(row);
         }
+
+        SelectedSnippet = previousId is null ? null : Snippets.FirstOrDefault(s => s.Id == previousId);
     }
 
     private void UpdateVisibleTags()
@@ -309,10 +351,19 @@ public sealed partial class VaultViewModel : ViewModelBase
         SortMode = SortMode.Updated;
     }
 
+    /// <summary>Cancels any pending debounced search. Idempotent: Unloaded can fire twice.</summary>
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        // Cancel only — the debounce task's own finally disposes the CTS. Disposing here
+        // would race a debounce task that has not observed the cancellation yet.
         _searchCts?.Cancel();
-        _searchCts?.Dispose();
     }
 }
 

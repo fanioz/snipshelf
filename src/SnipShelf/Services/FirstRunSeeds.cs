@@ -21,23 +21,26 @@ public static class FirstRunSeeds
             Body = """
                 SnipShelf keeps the snippets and prompts you actually reuse, on this machine only.
 
-                Saving something new
-                  Ctrl+N starts a new snippet. Title it, paste the body, add tags — a tag is
-                  just a word, and typing one you already use reuses it.
-
-                Finding it again
+                Finding things
                   The search box matches titles, bodies, and tag names as you type. Click a tag
-                  chip to narrow the list to it. Star the ones you reach for daily and they show
-                  up under Favorites.
+                  chip to narrow the list to it, or the ★ Favorites chip to see just the snippets
+                  marked as favorites. Sorting switches between updated date, title, and created
+                  date.
 
-                Copying
-                  Enter on a list item copies it. Ctrl+Shift+C copies whatever you are looking at.
+                Reading them
+                  Click a snippet in the list and it opens in the pane alongside for you to read.
+                  The pane is read-only, so browsing cannot change anything you have saved.
 
                 Snippets and prompts
                   Same thing, different label. "Prompt" is there so your AI prompts stop mixing
-                  in with your one-liners; the filter is one click away.
+                  in with your one-liners.
 
-                This note is a normal snippet. Edit it, or delete it — it will not come back.
+                Making it yours
+                  The Settings page switches the theme between light, dark, and following your
+                  system. The whole vault lives in a folder on this machine and nowhere else.
+
+                This note is a normal snippet, and "welcome" is one of its tags — search for
+                that whenever you want to find this note again.
                 """,
         },
         new Snippet
@@ -64,16 +67,17 @@ public static class FirstRunSeeds
             Kind = SnippetKind.Snippet,
             Tags = [new Tag(0, "example"), new Tag(0, "regex")],
             Body = """
-                ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$
+                ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?\z
 
                 Matches strict semver 2.0.0: major.minor.patch, optional -prerelease, optional
                 +build metadata.
 
-                The leading (0|[1-9]\d*) on each number is the part people get wrong — it rejects
+                The leading (0|[1-9][0-9]*) on each number is the part people get wrong — it rejects
                 "01.2.3", which semver does not allow.
 
-                Anchors matter: without ^ and $ this happily matches "1.2.3-nope" inside a longer
-                string.
+                Anchors matter: without ^ and \z this happily matches "1.2.3-nope" inside a longer
+                string. The pattern spells [0-9] rather than \d, which would also match non-ASCII
+                digits, and \z rather than $, which would tolerate one trailing newline.
                 """,
         },
     ];

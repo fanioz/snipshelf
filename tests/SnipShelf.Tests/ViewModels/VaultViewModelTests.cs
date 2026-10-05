@@ -69,7 +69,7 @@ public sealed class VaultViewModelTests
         viewModel.SearchQuery = "al";
         viewModel.SearchQuery = " alpha ";
 
-        await Task.Delay(350);
+        await viewModel.WhenSearchSettlesAsync();
 
         Assert.Equal(2, repository.SearchCalls.Count);
         Assert.Equal("alpha", repository.SearchCalls[^1].Term);
@@ -91,7 +91,7 @@ public sealed class VaultViewModelTests
         viewModel.SortMode = SortMode.Title;
         viewModel.SelectedTagId = 9;
         viewModel.FavoritesOnly = true;
-        await Task.Delay(350);
+        await viewModel.WhenSearchSettlesAsync();
 
         var call = repository.SearchCalls[^1];
         Assert.Equal("alpha", call.Term);
@@ -111,7 +111,7 @@ public sealed class VaultViewModelTests
         await viewModel.InitializeAsync();
 
         viewModel.SearchQuery = "missing";
-        await Task.Delay(350);
+        await viewModel.WhenSearchSettlesAsync();
 
         Assert.True(viewModel.IsNoResults);
         Assert.False(viewModel.IsEmptyVault);
@@ -156,6 +156,66 @@ public sealed class VaultViewModelTests
     }
 
     [Fact]
+    public async Task Refresh_KeepsTheSelectionWhenTheSelectedSnippetIsStillListed()
+    {
+        var repository = new FakeSnippetRepository
+        {
+            Snippets = [MakeSnippet(1, "Alpha"), MakeSnippet(2, "Beta")],
+        };
+        var viewModel = new VaultViewModel(repository);
+        await viewModel.InitializeAsync();
+
+        var selectedRow = viewModel.Snippets[0];
+        viewModel.SelectedSnippet = selectedRow;
+        viewModel.SearchQuery = "alph"; // Alpha still matches; every row object is rebuilt.
+        await viewModel.WhenSearchSettlesAsync();
+
+        Assert.Equal(1, viewModel.SelectedSnippet?.Id);
+        Assert.NotSame(selectedRow, viewModel.SelectedSnippet);
+    }
+
+    [Fact]
+    public async Task Refresh_ClearsTheSelectionWhenTheSelectedSnippetDropsOutOfTheResults()
+    {
+        var repository = new FakeSnippetRepository
+        {
+            Snippets = [MakeSnippet(1, "Alpha"), MakeSnippet(2, "Beta")],
+        };
+        var viewModel = new VaultViewModel(repository);
+        await viewModel.InitializeAsync();
+
+        viewModel.SelectedSnippet = viewModel.Snippets[0];
+        viewModel.SearchQuery = "beta";
+        await viewModel.WhenSearchSettlesAsync();
+
+        Assert.Null(viewModel.SelectedSnippet);
+        Assert.False(viewModel.HasSelection);
+    }
+
+    [Fact]
+    public async Task Refresh_WithResultsOnScreen_DoesNotFlashLoadingWhileSearching()
+    {
+        var repository = new FakeSnippetRepository
+        {
+            Snippets = [MakeSnippet(1, "Alpha"), MakeSnippet(2, "Beta")],
+            Delay = TimeSpan.FromMilliseconds(50),
+        };
+        var viewModel = new VaultViewModel(repository);
+        await viewModel.InitializeAsync();
+
+        viewModel.SearchQuery = "alpha";
+
+        // The previous list stays visible while the debounced search is pending.
+        Assert.False(viewModel.IsLoading);
+        Assert.True(viewModel.HasResults);
+
+        await viewModel.WhenSearchSettlesAsync();
+
+        Assert.Equal(VaultViewState.ShowingResults, viewModel.State);
+        Assert.Equal("Alpha", Assert.Single(viewModel.Snippets).Title);
+    }
+
+    [Fact]
     public async Task NewerSearch_SupersedesAnInFlightQuery()
     {
         var repository = new FakeSnippetRepository
@@ -166,10 +226,11 @@ public sealed class VaultViewModelTests
         var viewModel = new VaultViewModel(repository);
         await viewModel.InitializeAsync();
 
+        // The first query's debounced search is still pending when the second is typed;
+        // only the newer request may produce the final result.
         viewModel.SearchQuery = "alpha";
-        await Task.Delay(250);
         viewModel.SearchQuery = "beta";
-        await Task.Delay(600);
+        await viewModel.WhenSearchSettlesAsync();
 
         Assert.Equal("beta", repository.SearchCalls[^1].Term);
         Assert.Equal("Beta", Assert.Single(viewModel.Snippets).Title);
@@ -219,12 +280,12 @@ public sealed class VaultViewModelTests
         await viewModel.InitializeAsync();
 
         viewModel.FavoritesOnly = true;
-        await Task.Delay(350);
+        await viewModel.WhenSearchSettlesAsync();
         Assert.True(repository.SearchCalls[^1].FavoritesOnly);
         Assert.Equal("Alpha", Assert.Single(viewModel.Snippets).Title);
 
         viewModel.FavoritesOnly = false;
-        await Task.Delay(350);
+        await viewModel.WhenSearchSettlesAsync();
         Assert.False(repository.SearchCalls[^1].FavoritesOnly);
         Assert.Equal(2, viewModel.Snippets.Count);
     }
@@ -238,7 +299,7 @@ public sealed class VaultViewModelTests
 
         repository.ExceptionToThrow = new InvalidOperationException("database unavailable");
         viewModel.SearchQuery = "alpha";
-        await Task.Delay(350);
+        await viewModel.WhenSearchSettlesAsync();
         Assert.True(viewModel.IsError);
 
         repository.ExceptionToThrow = null;

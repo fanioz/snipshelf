@@ -12,22 +12,24 @@ public interface ISettingsService
 
     string SettingsFilePath { get; }
 
-    /// <summary>Raised after <see cref="UpdateAsync"/> persists a change.</summary>
+    /// <summary>Raised after <see cref="UpdateAsync"/> persists a change; never raised for a failed write.</summary>
     event EventHandler<AppSettings>? Changed;
 
     /// <summary>
     /// Reads settings.json. Synchronous on purpose: this runs once at startup before any
     /// window exists, and the theme has to be known before the first frame is drawn.
+    /// Serialized with <see cref="UpdateAsync"/> so a load never clobbers a pending save.
     /// </summary>
     AppSettings Load();
 
-    /// <summary>Async counterpart of <see cref="Load"/> for callers already off the startup path.</summary>
+    /// <summary>Reads settings.json asynchronously, for callers already off the startup path.</summary>
     Task<AppSettings> LoadAsync();
 
     /// <summary>
     /// Applies <paramref name="mutate"/> to a copy of the current settings and writes it out.
     /// The in-memory snapshot is updated even if the write fails, so the user's choice still
-    /// holds for the rest of the session.
+    /// holds for the rest of the session; the write itself may throw
+    /// <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>.
     /// </summary>
     Task UpdateAsync(Action<AppSettings> mutate, CancellationToken cancellationToken = default);
 }

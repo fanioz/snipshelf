@@ -13,8 +13,6 @@ namespace SnipShelf.Services;
 /// </remarks>
 public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider clock) : ISnippetRepository
 {
-    private const string EscapeCharacter = "\\";
-
     public Task<IReadOnlyList<Snippet>> SearchAsync(
         string? term = null,
         SortMode sort = SortMode.Updated,
@@ -22,7 +20,7 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
         bool favoritesOnly = false,
         CancellationToken cancellationToken = default)
     {
-        var filter = new SnippetFilter(term, tagId, favoritesOnly);
+        var filter = new SnippetFilter(tagId, favoritesOnly);
 
         return Task.Run(
             async () =>
@@ -46,8 +44,21 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
                     }
                 }
 
-                    var tags = await ReadTagsAsync(connection, snippets, cancellationToken).ConfigureAwait(false);
-                    return (IReadOnlyList<Snippet>)[.. snippets.Select(s => s with { Tags = tags[s.Id] })];
+                var tags = await ReadTagsAsync(connection, snippets, cancellationToken).ConfigureAwait(false);
+                var tagged = snippets.Select(s => s with { Tags = tags[s.Id] });
+
+                if (string.IsNullOrWhiteSpace(term))
+                {
+                    return (IReadOnlyList<Snippet>)[.. tagged];
+                }
+
+                // SQLite LIKE folds ASCII only, so term matching happens here to keep CAFÉ/café
+                // equivalent — the same OrdinalIgnoreCase matching used across the app.
+                var needle = term.Trim();
+                return (IReadOnlyList<Snippet>)[.. tagged.Where(s =>
+                    s.Title.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                    s.Body.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+                    s.Tags.Any(t => t.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)))];
             },
             cancellationToken);
     }
@@ -252,8 +263,8 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
 
     /// <summary>
     /// Brings the snippet's tag links in line with <paramref name="tags"/>. Names are compared
-    /// case-insensitively (Tags.Name is COLLATE NOCASE), so "PowerShell" reuses "powershell"
-    /// rather than tripping the unique index.
+    /// case-insensitively in C# (OrdinalIgnoreCase), so "PowerShell" reuses "powershell" —
+    /// tag identity is decided here, not by the database's ASCII-only NOCASE.
     /// </summary>
     private static async Task SyncTagsAsync(
         SqliteConnection connection,
@@ -306,8 +317,11 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
     }
 
     /// <summary>
-    /// Inserts the tag unless it is already there, then reads its id back. Two statements
-    /// rather than one because a multi-statement command only reports the first one's result.
+    /// Returns the id of the tag called <paramref name="name"/>, creating it when missing.
+    /// The lookup happens in C# with OrdinalIgnoreCase because SQLite NOCASE folds ASCII
+    /// only — under it, "CAFÉ" and "café" would become two rows. A lookup miss can never
+    /// trip the NOCASE unique index on insert either: ASCII folding is a subset of
+    /// OrdinalIgnoreCase folding, so NOCASE has no match whenever the lookup has none.
     /// </summary>
     private static async Task<long> GetOrCreateTagAsync(
         SqliteConnection connection,
@@ -315,19 +329,37 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
         string name,
         CancellationToken cancellationToken)
     {
+        name = name.Trim();
+
+        var existing = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        using (var select = connection.CreateCommand())
+        {
+            select.Transaction = transaction;
+            select.CommandText = "SELECT Id, Name FROM Tags;";
+            using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                existing[reader.GetString(1)] = reader.GetInt64(0);
+            }
+        }
+
+        if (existing.TryGetValue(name, out var id))
+        {
+            return id;
+        }
+
         using (var insert = connection.CreateCommand())
         {
             insert.Transaction = transaction;
-            insert.CommandText = "INSERT INTO Tags (Name) VALUES (@name) ON CONFLICT (Name) DO NOTHING;";
+            insert.CommandText = "INSERT INTO Tags (Name) VALUES (@name);";
             insert.Parameters.AddWithValue("@name", name);
             await insert.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        using var select = connection.CreateCommand();
-        select.Transaction = transaction;
-        select.CommandText = "SELECT Id FROM Tags WHERE Name = @name;";
-        select.Parameters.AddWithValue("@name", name);
-        return Convert.ToInt64(await select.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        using var rowId = connection.CreateCommand();
+        rowId.Transaction = transaction;
+        rowId.CommandText = "SELECT last_insert_rowid();";
+        return Convert.ToInt64(await rowId.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
     }
 
     private static string Format(DateTimeOffset value) =>
@@ -341,36 +373,23 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
     private static SnippetKind ReadKind(string value) =>
         Enum.TryParse(value, ignoreCase: true, out SnippetKind kind) ? kind : SnippetKind.Snippet;
 
-    private sealed class SnippetFilter(string? term, long? tagId, bool favoritesOnly)
+    // The term is deliberately not a SQL filter: LIKE folds ASCII only, so SearchAsync
+    // matches it in C# once the rows and their tags are in hand.
+    private sealed class SnippetFilter(long? tagId, bool favoritesOnly)
     {
-        public string Sql { get; } = BuildSql(term, tagId, favoritesOnly);
+        public string Sql { get; } = BuildSql(tagId, favoritesOnly);
 
         public void Bind(SqliteCommand command)
         {
-            if (!string.IsNullOrWhiteSpace(term))
-            {
-                command.Parameters.AddWithValue("@term", $"%{Escape(term.Trim())}%");
-            }
-
             if (tagId is not null)
             {
                 command.Parameters.AddWithValue("@tagId", tagId.Value);
             }
         }
 
-        private static string BuildSql(string? term, long? tagId, bool favoritesOnly)
+        private static string BuildSql(long? tagId, bool favoritesOnly)
         {
             var clauses = new List<string>();
-
-            if (!string.IsNullOrWhiteSpace(term))
-            {
-                clauses.Add($"""
-                    (s.Title LIKE @term ESCAPE '{EscapeCharacter}'
-                     OR s.Body LIKE @term ESCAPE '{EscapeCharacter}'
-                     OR EXISTS (SELECT 1 FROM SnippetTags st JOIN Tags t ON t.Id = st.TagId
-                                WHERE st.SnippetId = s.Id AND t.Name LIKE @term ESCAPE '{EscapeCharacter}'))
-                    """);
-            }
 
             if (tagId is not null)
             {
@@ -384,14 +403,5 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
 
             return clauses.Count == 0 ? "1" : string.Join(" AND ", clauses);
         }
-
-        /// <summary>
-        /// Makes LIKE treat the user's % and _ as literal characters. Without this, searching
-        /// for "100%" matches everything.
-        /// </summary>
-        private static string Escape(string term) => term
-            .Replace(EscapeCharacter, EscapeCharacter + EscapeCharacter, StringComparison.Ordinal)
-            .Replace("%", EscapeCharacter + "%", StringComparison.Ordinal)
-            .Replace("_", EscapeCharacter + "_", StringComparison.Ordinal);
     }
 }

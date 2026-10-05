@@ -25,6 +25,8 @@ public sealed class FakeSnippetRepository : ISnippetRepository
         bool favoritesOnly = false,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         SearchCalls.Add(new SearchCall(term, sort, tagId, favoritesOnly));
 
         if (Delay > TimeSpan.Zero)
@@ -71,7 +73,12 @@ public sealed class FakeSnippetRepository : ISnippetRepository
 
     public Task<long> UpsertAsync(Snippet snippet, CancellationToken cancellationToken = default)
     {
-        var id = snippet.Id == 0 ? Snippets.Count + 1 : snippet.Id;
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Max existing id + 1: Count + 1 collides whenever the seeded ids have gaps.
+        var id = snippet.Id == 0
+            ? Snippets.Select(s => s.Id).DefaultIfEmpty(0).Max() + 1
+            : snippet.Id;
         var saved = snippet with { Id = id };
         Snippets.RemoveAll(s => s.Id == id);
         Snippets.Add(saved);
@@ -80,12 +87,16 @@ public sealed class FakeSnippetRepository : ISnippetRepository
 
     public Task<Snippet?> GetAsync(long id, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var match = Snippets.FirstOrDefault(s => s.Id == id);
         return Task.FromResult(match);
     }
 
     public Task DeleteAsync(long id, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         Snippets.RemoveAll(s => s.Id == id);
         return Task.CompletedTask;
     }

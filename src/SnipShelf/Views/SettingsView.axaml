@@ -12,6 +12,7 @@
             <ComboBox Grid.Column="1"
                       ItemsSource="{Binding Themes}"
                       SelectedItem="{Binding Theme}"
+                      AutomationProperties.Name="Theme"
                       MinWidth="160"
                       HorizontalAlignment="Left" />
         </Grid>
