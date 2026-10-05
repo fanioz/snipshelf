@@ -1,0 +1,34 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:fa="using:FluentAvalonia.UI.Controls"
+        xmlns:vm="using:SnipShelf.ViewModels"
+        x:Class="SnipShelf.Views.MainWindow"
+        x:DataType="vm:ShellViewModel"
+        Icon="/Assets/avalonia-logo.ico"
+        Title="SnipShelf"
+        Width="1000"
+        Height="700">
+
+    <!--
+      IsSettingsVisible is False on purpose: Settings is one of our own nav items
+      (ShellPage.Settings), not NavigationView's built-in settings entry. Mixing the two
+      would give two settings destinations and break SelectedItem's data binding.
+    -->
+    <fa:NavigationView PaneTitle="SnipShelf"
+                      IsBackButtonVisible="False"
+                      IsSettingsVisible="False"
+                      MenuItemsSource="{Binding NavItems}"
+                      SelectedItem="{Binding SelectedNavItem, Mode=TwoWay}">
+
+        <fa:NavigationView.MenuItemTemplate>
+            <DataTemplate x:DataType="vm:NavItemViewModel">
+                <fa:NavigationViewItem IconSource="{Binding Icon}"
+                                      Content="{Binding Title}" />
+            </DataTemplate>
+        </fa:NavigationView.MenuItemTemplate>
+
+        <fa:Frame x:Name="PageFrame" />
+
+    </fa:NavigationView>
+
+</Window>
