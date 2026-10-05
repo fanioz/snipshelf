@@ -8,13 +8,14 @@ public class AppSettingsSerializerTests
     [Fact]
     public void RoundTrip_PreservesValues()
     {
-        var original = new AppSettings { Theme = AppTheme.Dark, LastPage = ShellPage.Favorites };
+        var original = new AppSettings { Theme = AppTheme.Dark, LastPage = ShellPage.Favorites, SeedsInserted = true };
 
         var json = AppSettingsSerializer.Serialize(original);
         Assert.True(AppSettingsSerializer.TryDeserialize(json, out var restored));
 
         Assert.Equal(AppTheme.Dark, restored.Theme);
         Assert.Equal(ShellPage.Favorites, restored.LastPage);
+        Assert.True(restored.SeedsInserted);
     }
 
     [Fact]

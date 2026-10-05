@@ -46,8 +46,16 @@ public sealed class TempVault : IDisposable
     public static async Task<TempVault> CreateAsync()
     {
         var vault = New(seedsAlreadyInserted: true);
-        await vault.Bootstrapper.InitializeAsync();
-        return vault;
+        try
+        {
+            await vault.Bootstrapper.InitializeAsync();
+            return vault;
+        }
+        catch
+        {
+            vault.Dispose();
+            throw;
+        }
     }
 
     public void Dispose()

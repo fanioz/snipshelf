@@ -97,7 +97,11 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
                     update.Parameters.AddWithValue("@favorite", snippet.Favorite ? 1 : 0);
                     update.Parameters.AddWithValue("@updated", Format(clock.GetUtcNow()));
                     update.Parameters.AddWithValue("@id", snippet.Id);
-                    await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    var rowsAffected = await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                    if (rowsAffected == 0)
+                    {
+                        throw new InvalidOperationException($"Snippet with Id {snippet.Id} not found or was deleted.");
+                    }
                     id = snippet.Id;
                 }
 
