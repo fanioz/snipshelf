@@ -124,7 +124,10 @@ public sealed class SettingsService : ISettingsService
     // be able to tell that the change never reached the disk.
     private async Task WriteFileAsync(AppSettings settings, CancellationToken cancellationToken)
     {
-        var temp = SettingsFilePath + ".tmp";
+        // A unique temp per write: the gate serializes writers inside this process, but two
+        // app instances share the settings path and would delete or move each other's temp
+        // file mid-write under a fixed name. Last writer still wins on the final file.
+        var temp = $"{SettingsFilePath}.{Guid.NewGuid():N}.tmp";
         try
         {
             Directory.CreateDirectory(DataFolder);

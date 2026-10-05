@@ -16,9 +16,10 @@ public interface ISettingsService
     event EventHandler<AppSettings>? Changed;
 
     /// <summary>
-    /// Reads settings.json. Synchronous on purpose: this runs once at startup before any
-    /// window exists, and the theme has to be known before the first frame is drawn.
-    /// Serialized with <see cref="UpdateAsync"/> so a load never clobbers a pending save.
+    /// Reads settings.json. Synchronous on purpose: this runs at startup, before any window
+    /// exists — the shell reads the last page from it in its constructor, and the theme has
+    /// to be known before the first frame is drawn. Serialized with <see cref="UpdateAsync"/>
+    /// so a load never clobbers a pending save.
     /// </summary>
     AppSettings Load();
 

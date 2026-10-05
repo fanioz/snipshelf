@@ -209,11 +209,14 @@ public sealed class SqliteSnippetRepositoryTests
     }
 
     // % is escaped before binding, so LIKE treats the user's wildcards as literal characters.
+    // The "1000" row guards the escape: with it dropped, the term's % would act as a wildcard
+    // and match that row too.
     [Fact]
     public async Task SearchAsync_TermWithPercent_MatchesItLiterally()
     {
         using var vault = await TempVault.CreateAsync();
         await vault.Repository.UpsertAsync(NewSnippet("Progress: 100% done", "body"));
+        await vault.Repository.UpsertAsync(NewSnippet("1000", "body"));
 
         Assert.Equal("Progress: 100% done", Assert.Single(await vault.Repository.SearchAsync("100%")).Title);
     }

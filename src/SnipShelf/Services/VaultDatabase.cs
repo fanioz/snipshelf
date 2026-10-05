@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
@@ -16,10 +15,6 @@ namespace SnipShelf.Services;
 public sealed class VaultDatabase
 {
     public const string FileName = "snipvault.db";
-
-    // A translated pattern is bounded — one trimmed search term per query — so compiled
-    // Regexes are cached by their source string instead of being rebuilt per keystroke.
-    private static readonly ConcurrentDictionary<string, Regex> LikePatterns = new();
 
     public VaultDatabase(string dataFolder)
     {
@@ -72,17 +67,17 @@ public sealed class VaultDatabase
             return false;
         }
 
-        return LikePatterns
-            .GetOrAdd(
-                TranslateLikePattern(pattern, escape),
-                static source => new Regex(
-                    source,
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline,
-                    TimeSpan.FromSeconds(1)))
-            .IsMatch(text);
+        // Regex.IsMatch runs through the runtime's bounded static cache (Regex.CacheSize,
+        // 15 entries, least-recently-used dropped) instead of a dictionary that would keep
+        // a compiled Regex for every term ever searched for the app's lifetime.
+        return Regex.IsMatch(
+            text,
+            TranslateLikePattern(pattern, escape),
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline,
+            TimeSpan.FromSeconds(1));
     }
 
-    /// <summary>Turns a LIKE pattern into an anchored Regex source, which doubles as the cache key.</summary>
+    /// <summary>Turns a LIKE pattern into an anchored Regex source.</summary>
     private static string TranslateLikePattern(string pattern, string? escape)
     {
         char? escapeCharacter = string.IsNullOrEmpty(escape) ? null : escape[0];

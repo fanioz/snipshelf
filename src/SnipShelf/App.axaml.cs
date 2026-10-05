@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Media;
 using Avalonia.Threading;
 using FluentAvalonia.UI.Controls;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,7 +37,28 @@ public partial class App : Application
         // The Vault is empty until the schema exists; blocking here keeps the first Vault
         // render from racing the data layer. It is milliseconds on a cold start and runs
         // before any window is shown.
-        services.GetRequiredService<DatabaseBootstrapper>().InitializeAsync().GetAwaiter().GetResult();
+        try
+        {
+            services.GetRequiredService<DatabaseBootstrapper>().InitializeAsync().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            // Nothing renders without the vault and no window exists yet to host an error
+            // view, so surface the failure itself instead of crashing before anything shows.
+            new Window
+            {
+                Title = "SnipShelf",
+                Width = 420,
+                Height = 200,
+                Content = new TextBlock
+                {
+                    Margin = new Thickness(16),
+                    TextWrapping = TextWrapping.Wrap,
+                    Text = $"SnipShelf could not open its vault:\n{ex.Message}",
+                },
+            }.Show();
+            return;
+        }
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

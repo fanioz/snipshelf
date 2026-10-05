@@ -26,7 +26,8 @@ public sealed class FakeSnippetRepository : ISnippetRepository
         string? Term,
         SortMode Sort,
         long? TagId,
-        bool FavoritesOnly);
+        bool FavoritesOnly,
+        CancellationToken CancellationToken);
 
     public async Task<IReadOnlyList<Snippet>> SearchAsync(
         string? term = null,
@@ -37,7 +38,7 @@ public sealed class FakeSnippetRepository : ISnippetRepository
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        SearchCalls.Add(new SearchCall(term, sort, tagId, favoritesOnly));
+        SearchCalls.Add(new SearchCall(term, sort, tagId, favoritesOnly, cancellationToken));
 
         // TrySetResult: the task may already be completed. Rotating hands the next search
         // a fresh task instead of re-signaling a completed one.
@@ -95,6 +96,12 @@ public sealed class FakeSnippetRepository : ISnippetRepository
     {
         cancellationToken.ThrowIfCancellationRequested();
 
+        if (snippet.Id != 0 && !Snippets.Any(s => s.Id == snippet.Id))
+        {
+            // Matches the real repository, which rejects updates to missing snippets.
+            throw new InvalidOperationException($"Snippet with Id {snippet.Id} not found or was deleted.");
+        }
+
         // Max existing id + 1: Count + 1 collides whenever the seeded ids have gaps.
         var id = snippet.Id == 0
             ? Snippets.Select(s => s.Id).DefaultIfEmpty(0).Max() + 1
@@ -129,6 +136,11 @@ public sealed class FakeSnippetRepository : ISnippetRepository
             throw TagExceptionToThrow;
         }
 
-        return Task.FromResult<IReadOnlyList<TagCount>>(TagCounts.ToList());
+        // Mirror the real repository's contract: count descending, then name ascending.
+        return Task.FromResult<IReadOnlyList<TagCount>>(
+            TagCounts
+                .OrderByDescending(t => t.SnippetCount)
+                .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList());
     }
 }

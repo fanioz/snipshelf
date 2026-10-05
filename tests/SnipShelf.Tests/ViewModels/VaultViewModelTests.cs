@@ -233,8 +233,8 @@ public sealed class VaultViewModelTests
         var alphaInFlight = repository.SearchStarted.Task;
         viewModel.SearchQuery = "alpha";
         await alphaInFlight; // Alpha's 200 ms debounce expired; its search is parked at the gate.
-        Assert.Single(repository.SearchCalls);
-        Assert.Equal("alpha", repository.SearchCalls[^1].Term);
+        var alphaCall = Assert.Single(repository.SearchCalls);
+        Assert.Equal("alpha", alphaCall.Term);
 
         // Typing beta must cancel alpha mid-flight. The gate is removed synchronously so
         // beta's own search runs unimpeded, while the still-uncompleted gate task keeps an
@@ -242,6 +242,7 @@ public sealed class VaultViewModelTests
         viewModel.SearchQuery = "beta";
         repository.SearchGate = null;
         await viewModel.WhenSearchSettlesAsync(); // Beta settles.
+        Assert.True(alphaCall.CancellationToken.IsCancellationRequested); // Beta canceled alpha mid-flight.
 
         // Releasing the park lets a stale alpha result through only if the VM failed to
         // cancel it; give such a regression a moment to corrupt the list before asserting.
