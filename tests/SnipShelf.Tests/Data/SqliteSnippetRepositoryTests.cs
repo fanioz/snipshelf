@@ -178,8 +178,9 @@ public sealed class SqliteSnippetRepositoryTests
         Assert.Empty(await vault.Repository.SearchAsync());
     }
 
-    // Term matching is OrdinalIgnoreCase in C#, so Unicode case pairs like café/CAFÉ count
-    // as the same letters — not just the ASCII ones SQL LIKE folds.
+    // The like() override in VaultDatabase gives SQL LIKE the app's Unicode case folding,
+    // so café/CAFÉ count as the same letters — the ASCII-only LIKE built into SQLite would
+    // fail this search.
     [Fact]
     public async Task SearchAsync_TermDifferingOnlyByUnicodeCase_FindsTheSnippetByTitle()
     {
@@ -198,7 +199,16 @@ public sealed class SqliteSnippetRepositoryTests
         Assert.Equal("Tagged", Assert.Single(await vault.Repository.SearchAsync("CAFÉ")).Title);
     }
 
-    // % and _ are literal characters here: matching is C# Contains, not SQL LIKE.
+    [Fact]
+    public async Task SearchAsync_TermMatchingTheBody_FindsTheSnippet()
+    {
+        using var vault = await TempVault.CreateAsync();
+        await vault.Repository.UpsertAsync(NewSnippet("Untouched", "the needle is buried in the body"));
+
+        Assert.Equal("Untouched", Assert.Single(await vault.Repository.SearchAsync("needle")).Title);
+    }
+
+    // % is escaped before binding, so LIKE treats the user's wildcards as literal characters.
     [Fact]
     public async Task SearchAsync_TermWithPercent_MatchesItLiterally()
     {

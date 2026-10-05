@@ -13,6 +13,8 @@ namespace SnipShelf.Services;
 /// </remarks>
 public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider clock) : ISnippetRepository
 {
+    private const string EscapeCharacter = "\\";
+
     public Task<IReadOnlyList<Snippet>> SearchAsync(
         string? term = null,
         SortMode sort = SortMode.Updated,
@@ -20,7 +22,7 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
         bool favoritesOnly = false,
         CancellationToken cancellationToken = default)
     {
-        var filter = new SnippetFilter(tagId, favoritesOnly);
+        var filter = new SnippetFilter(term, tagId, favoritesOnly);
 
         return Task.Run(
             async () =>
@@ -45,20 +47,7 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
                 }
 
                 var tags = await ReadTagsAsync(connection, snippets, cancellationToken).ConfigureAwait(false);
-                var tagged = snippets.Select(s => s with { Tags = tags[s.Id] });
-
-                if (string.IsNullOrWhiteSpace(term))
-                {
-                    return (IReadOnlyList<Snippet>)[.. tagged];
-                }
-
-                // SQLite LIKE folds ASCII only, so term matching happens here to keep CAFÉ/café
-                // equivalent — the same OrdinalIgnoreCase matching used across the app.
-                var needle = term.Trim();
-                return (IReadOnlyList<Snippet>)[.. tagged.Where(s =>
-                    s.Title.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                    s.Body.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-                    s.Tags.Any(t => t.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)))];
+                return (IReadOnlyList<Snippet>)[.. snippets.Select(s => s with { Tags = tags[s.Id] })];
             },
             cancellationToken);
     }
@@ -386,23 +375,39 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
     private static SnippetKind ReadKind(string value) =>
         Enum.TryParse(value, ignoreCase: true, out SnippetKind kind) ? kind : SnippetKind.Snippet;
 
-    // The term is deliberately not a SQL filter: LIKE folds ASCII only, so SearchAsync
-    // matches it in C# once the rows and their tags are in hand.
-    private sealed class SnippetFilter(long? tagId, bool favoritesOnly)
+    // The term is a SQL filter again so the reader streams only matching rows — the PRD
+    // budgets search at <50ms for 1,000 snippets. SQLite LIKE folds ASCII only; the like()
+    // override in VaultDatabase supplies the Unicode folding that keeps CAFÉ finding café.
+    private sealed class SnippetFilter(string? term, long? tagId, bool favoritesOnly)
     {
-        public string Sql { get; } = BuildSql(tagId, favoritesOnly);
+        public string Sql { get; } = BuildSql(term, tagId, favoritesOnly);
 
         public void Bind(SqliteCommand command)
         {
+            if (!string.IsNullOrWhiteSpace(term))
+            {
+                command.Parameters.AddWithValue("@term", $"%{Escape(term.Trim())}%");
+            }
+
             if (tagId is not null)
             {
                 command.Parameters.AddWithValue("@tagId", tagId.Value);
             }
         }
 
-        private static string BuildSql(long? tagId, bool favoritesOnly)
+        private static string BuildSql(string? term, long? tagId, bool favoritesOnly)
         {
             var clauses = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(term))
+            {
+                clauses.Add($"""
+                    (s.Title LIKE @term ESCAPE '{EscapeCharacter}'
+                     OR s.Body LIKE @term ESCAPE '{EscapeCharacter}'
+                     OR EXISTS (SELECT 1 FROM SnippetTags st JOIN Tags t ON t.Id = st.TagId
+                                WHERE st.SnippetId = s.Id AND t.Name LIKE @term ESCAPE '{EscapeCharacter}'))
+                    """);
+            }
 
             if (tagId is not null)
             {
@@ -416,5 +421,14 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
 
             return clauses.Count == 0 ? "1" : string.Join(" AND ", clauses);
         }
+
+        /// <summary>
+        /// Makes LIKE treat the user's % and _ as literal characters. Without this, searching
+        /// for "100%" matches everything.
+        /// </summary>
+        private static string Escape(string term) => term
+            .Replace(EscapeCharacter, EscapeCharacter + EscapeCharacter, StringComparison.Ordinal)
+            .Replace("%", EscapeCharacter + "%", StringComparison.Ordinal)
+            .Replace("_", EscapeCharacter + "_", StringComparison.Ordinal);
     }
 }

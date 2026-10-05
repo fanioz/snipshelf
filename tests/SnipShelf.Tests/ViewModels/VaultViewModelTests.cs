@@ -221,19 +221,38 @@ public sealed class VaultViewModelTests
         var repository = new FakeSnippetRepository
         {
             Snippets = [MakeSnippet(1, "Alpha"), MakeSnippet(2, "Beta")],
-            Delay = TimeSpan.FromMilliseconds(300),
         };
         var viewModel = new VaultViewModel(repository);
         await viewModel.InitializeAsync();
+        repository.SearchCalls.Clear(); // Count only the two query searches under test.
 
-        // The first query's debounced search is still pending when the second is typed;
-        // only the newer request may produce the final result.
+        // Park alpha's search inside the fake once it is genuinely in flight.
+        var alphaGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        repository.SearchGate = alphaGate;
+
+        var alphaInFlight = repository.SearchStarted.Task;
         viewModel.SearchQuery = "alpha";
-        viewModel.SearchQuery = "beta";
-        await viewModel.WhenSearchSettlesAsync();
+        await alphaInFlight; // Alpha's 200 ms debounce expired; its search is parked at the gate.
+        Assert.Single(repository.SearchCalls);
+        Assert.Equal("alpha", repository.SearchCalls[^1].Term);
 
+        // Typing beta must cancel alpha mid-flight. The gate is removed synchronously so
+        // beta's own search runs unimpeded, while the still-uncompleted gate task keeps an
+        // un-canceled alpha parked past beta's result.
+        viewModel.SearchQuery = "beta";
+        repository.SearchGate = null;
+        await viewModel.WhenSearchSettlesAsync(); // Beta settles.
+
+        // Releasing the park lets a stale alpha result through only if the VM failed to
+        // cancel it; give such a regression a moment to corrupt the list before asserting.
+        alphaGate.TrySetResult();
+        await Task.Delay(TimeSpan.FromMilliseconds(100));
+
+        Assert.Equal(VaultViewState.ShowingResults, viewModel.State);
+        Assert.Equal(2, repository.SearchCalls.Count);
         Assert.Equal("beta", repository.SearchCalls[^1].Term);
         Assert.Equal("Beta", Assert.Single(viewModel.Snippets).Title);
+        Assert.DoesNotContain(viewModel.Snippets, s => s.Title == "Alpha");
     }
 
     [Theory]

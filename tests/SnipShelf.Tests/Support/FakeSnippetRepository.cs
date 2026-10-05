@@ -12,6 +12,16 @@ public sealed class FakeSnippetRepository : ISnippetRepository
     public Exception? TagExceptionToThrow { get; set; }
     public Exception? ExceptionToThrow { get; set; }
 
+    // Completes when the next search is genuinely in flight so tests can await that moment
+    // deterministically; rotated after each signal so every search gets a fresh task.
+    public TaskCompletionSource SearchStarted { get; private set; } =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // While non-null, SearchAsync parks in flight on this gate until it completes, so tests
+    // can hold a search mid-flight deterministically; cancellation while parked throws
+    // OperationCanceledException, matching a real in-flight cancellation.
+    public TaskCompletionSource? SearchGate { get; set; }
+
     public sealed record SearchCall(
         string? Term,
         SortMode Sort,
@@ -28,6 +38,16 @@ public sealed class FakeSnippetRepository : ISnippetRepository
         cancellationToken.ThrowIfCancellationRequested();
 
         SearchCalls.Add(new SearchCall(term, sort, tagId, favoritesOnly));
+
+        // TrySetResult: the task may already be completed. Rotating hands the next search
+        // a fresh task instead of re-signaling a completed one.
+        SearchStarted.TrySetResult();
+        SearchStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        if (SearchGate is not null)
+        {
+            await SearchGate.Task.WaitAsync(cancellationToken);
+        }
 
         if (Delay > TimeSpan.Zero)
         {
