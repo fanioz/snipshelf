@@ -93,7 +93,7 @@ public sealed partial class VaultViewModel : ViewModelBase
         try
         {
             State = VaultViewState.Loading;
-            await RefreshTagsAsync(cts.Token);
+            await RefreshTagsAsync(cancellationToken);
             await RefreshSnippetsAsync(version, cts.Token);
         }
         catch (OperationCanceledException) when (_searchVersion == version)
