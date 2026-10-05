@@ -19,4 +19,12 @@ public partial class VaultView : UserControl
             await viewModel.InitializeAsync();
         }
     }
+
+    private void OnUnloaded(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is VaultViewModel viewModel)
+        {
+            viewModel.Dispose();
+        }
+    }
 }

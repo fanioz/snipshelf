@@ -5,7 +5,8 @@
              x:Class="SnipShelf.Views.VaultView"
              x:DataType="vm:VaultViewModel"
              x:Name="Root"
-             Loaded="OnLoaded">
+             Loaded="OnLoaded"
+             Unloaded="OnUnloaded">
 
     <Grid ColumnDefinitions="340,Auto,*">
         <!-- Left Pane: Search, Filters, List -->
