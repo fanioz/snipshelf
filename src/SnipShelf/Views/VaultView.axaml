@@ -161,6 +161,20 @@
                     <TextBlock Text="Loading snippets…" Opacity="0.6" HorizontalAlignment="Center" />
                 </StackPanel>
 
+                <!-- Error State -->
+                <StackPanel IsVisible="{Binding IsError}"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Center"
+                            Spacing="10"
+                            Margin="16">
+                    <TextBlock Text="Could not load snippets. Please try again."
+                               TextWrapping="Wrap"
+                               TextAlignment="Center" />
+                    <Button Content="Retry"
+                            Command="{Binding LoadCommand}"
+                            HorizontalAlignment="Center" />
+                </StackPanel>
+
                 <!-- Empty Vault State -->
                 <StackPanel IsVisible="{Binding IsEmptyVault}"
                             VerticalAlignment="Center"

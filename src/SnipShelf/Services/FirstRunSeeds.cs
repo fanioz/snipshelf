@@ -7,7 +7,7 @@ namespace SnipShelf.Services;
 /// </summary>
 /// <remarks>
 /// These are ordinary records with nothing marking them as seeds: the user can edit or delete
-/// any of them, and the flag in settings.json is what stops them from coming back.
+/// any of them, and the marker in the database Meta table is what stops them from coming back.
 /// </remarks>
 public static class FirstRunSeeds
 {

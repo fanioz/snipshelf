@@ -64,48 +64,60 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
                 using var connection = database.OpenConnection();
                 using var transaction = connection.BeginTransaction();
 
-                long id;
-                if (snippet.Id == 0)
-                {
-                    var now = Format(clock.GetUtcNow());
-                    using var insert = connection.CreateCommand();
-                    insert.Transaction = transaction;
-                    insert.CommandText = """
-                        INSERT INTO Snippets (Title, Body, Kind, Favorite, CreatedUtc, UpdatedUtc)
-                        VALUES (@title, @body, @kind, @favorite, @created, @created);
-                        SELECT last_insert_rowid();
-                        """;
-                    insert.Parameters.AddWithValue("@title", snippet.Title.Trim());
-                    insert.Parameters.AddWithValue("@body", snippet.Body);
-                    insert.Parameters.AddWithValue("@kind", WriteKind(snippet.Kind));
-                    insert.Parameters.AddWithValue("@favorite", snippet.Favorite ? 1 : 0);
-                    insert.Parameters.AddWithValue("@created", now);
-                    id = Convert.ToInt64(await insert.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
-                }
-                else
-                {
-                    using var update = connection.CreateCommand();
-                    update.Transaction = transaction;
-                    update.CommandText = """
-                        UPDATE Snippets
-                        SET Title = @title, Body = @body, Kind = @kind, Favorite = @favorite, UpdatedUtc = @updated
-                        WHERE Id = @id;
-                        """;
-                    update.Parameters.AddWithValue("@title", snippet.Title.Trim());
-                    update.Parameters.AddWithValue("@body", snippet.Body);
-                    update.Parameters.AddWithValue("@kind", WriteKind(snippet.Kind));
-                    update.Parameters.AddWithValue("@favorite", snippet.Favorite ? 1 : 0);
-                    update.Parameters.AddWithValue("@updated", Format(clock.GetUtcNow()));
-                    update.Parameters.AddWithValue("@id", snippet.Id);
-                    await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-                    id = snippet.Id;
-                }
-
-                await SyncTagsAsync(connection, transaction, id, snippet.Tags, cancellationToken).ConfigureAwait(false);
+                var id = await UpsertInTransactionAsync(
+                    connection, transaction, snippet, clock, cancellationToken).ConfigureAwait(false);
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
                 return id;
             },
             cancellationToken);
+    }
+
+    internal static async Task<long> UpsertInTransactionAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        Snippet snippet,
+        TimeProvider clock,
+        CancellationToken cancellationToken)
+    {
+        long id;
+        if (snippet.Id == 0)
+        {
+            var now = Format(clock.GetUtcNow());
+            using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO Snippets (Title, Body, Kind, Favorite, CreatedUtc, UpdatedUtc)
+                VALUES (@title, @body, @kind, @favorite, @created, @created);
+                SELECT last_insert_rowid();
+                """;
+            insert.Parameters.AddWithValue("@title", snippet.Title.Trim());
+            insert.Parameters.AddWithValue("@body", snippet.Body);
+            insert.Parameters.AddWithValue("@kind", WriteKind(snippet.Kind));
+            insert.Parameters.AddWithValue("@favorite", snippet.Favorite ? 1 : 0);
+            insert.Parameters.AddWithValue("@created", now);
+            id = Convert.ToInt64(await insert.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            using var update = connection.CreateCommand();
+            update.Transaction = transaction;
+            update.CommandText = """
+                UPDATE Snippets
+                SET Title = @title, Body = @body, Kind = @kind, Favorite = @favorite, UpdatedUtc = @updated
+                WHERE Id = @id;
+                """;
+            update.Parameters.AddWithValue("@title", snippet.Title.Trim());
+            update.Parameters.AddWithValue("@body", snippet.Body);
+            update.Parameters.AddWithValue("@kind", WriteKind(snippet.Kind));
+            update.Parameters.AddWithValue("@favorite", snippet.Favorite ? 1 : 0);
+            update.Parameters.AddWithValue("@updated", Format(clock.GetUtcNow()));
+            update.Parameters.AddWithValue("@id", snippet.Id);
+            await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            id = snippet.Id;
+        }
+
+        await SyncTagsAsync(connection, transaction, id, snippet.Tags, cancellationToken).ConfigureAwait(false);
+        return id;
     }
 
     public Task<Snippet?> GetAsync(long id, CancellationToken cancellationToken = default)

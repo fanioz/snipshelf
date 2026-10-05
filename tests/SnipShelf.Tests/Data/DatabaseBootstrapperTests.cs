@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using SnipShelf.Models;
 using SnipShelf.Services;
 using SnipShelf.Tests.Support;
@@ -47,7 +48,8 @@ public sealed class DatabaseBootstrapperTests
             ["Explain this code", "Regex: semver", "Welcome — how to use SnipShelf"],
             seeds.Select(s => s.Title).OrderBy(t => t, StringComparer.Ordinal));
         Assert.Equal(SnippetKind.Prompt, seeds.Single(s => s.Title == "Explain this code").Kind);
-        Assert.True(vault.Settings.Current.SeedsInserted);
+        Assert.Equal(["true"], Query(vault.Database, "SELECT Value FROM Meta WHERE Key = 'seeds_inserted'"));
+        Assert.Empty(vault.Settings.Updates);
     }
 
     // The seeds teach tag filtering, so they carry tags like any other record.
@@ -85,7 +87,7 @@ public sealed class DatabaseBootstrapperTests
 
         await vault.Bootstrapper.InitializeAsync();
 
-        Assert.DoesNotContain(await vault.Repository.SearchAsync(), s => s.Id == welcome.Id);
+        Assert.DoesNotContain(await vault.Repository.SearchAsync(), s => s.Title.StartsWith("Welcome"));
     }
 
     [Fact]
@@ -96,6 +98,49 @@ public sealed class DatabaseBootstrapperTests
         await vault.Bootstrapper.InitializeAsync();
 
         Assert.Empty(await vault.Repository.SearchAsync());
+        Assert.Equal(["true"], Query(vault.Database, "SELECT Value FROM Meta WHERE Key = 'seeds_inserted'"));
+
+        var restarted = new DatabaseBootstrapper(vault.Database, new FakeSettingsService());
+        await restarted.InitializeAsync();
+        Assert.Empty(await vault.Repository.SearchAsync());
+    }
+
+    [Theory]
+    [InlineData("Snippets", "NEW.Title = 'Explain this code'")]
+    [InlineData("Meta", "NEW.Key = 'seeds_inserted'")]
+    public async Task InitializeAsync_WhenSeedingFails_RollsBackAndCanRetry(string table, string condition)
+    {
+        using var vault = await TempVault.CreateAsync();
+        await vault.Settings.UpdateAsync(current => current.SeedsInserted = false);
+        using (var connection = vault.Database.OpenConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                DELETE FROM Meta WHERE Key = 'seeds_inserted';
+                CREATE TRIGGER FailSeeding BEFORE INSERT ON {table}
+                WHEN {condition}
+                BEGIN SELECT RAISE(ABORT, 'simulated write failure'); END;
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        await Assert.ThrowsAsync<SqliteException>(() => vault.Bootstrapper.InitializeAsync());
+
+        Assert.Empty(await vault.Repository.SearchAsync());
+        Assert.Empty(await vault.Repository.GetTagsWithCountsAsync());
+        Assert.Empty(Query(vault.Database, "SELECT Value FROM Meta WHERE Key = 'seeds_inserted'"));
+        Assert.Empty(Query(vault.Database, "SELECT CAST(SnippetId AS TEXT) FROM SnippetTags"));
+
+        using (var connection = vault.Database.OpenConnection())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "DROP TRIGGER FailSeeding;";
+            command.ExecuteNonQuery();
+        }
+
+        await vault.Bootstrapper.InitializeAsync();
+        Assert.Equal(FirstRunSeeds.All.Count, (await vault.Repository.SearchAsync()).Count);
+        Assert.Equal(["true"], Query(vault.Database, "SELECT Value FROM Meta WHERE Key = 'seeds_inserted'"));
     }
 
     private static List<string> Query(VaultDatabase database, string sql)

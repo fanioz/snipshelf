@@ -175,17 +175,92 @@ public sealed class VaultViewModelTests
         Assert.Equal("Beta", Assert.Single(viewModel.Snippets).Title);
     }
 
-    [Fact]
-    public async Task SearchFailure_ShowsErrorAndRetryCommandCanReload()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LoadFailure_ShowsErrorAndRetryCommandCanReload(bool failTags)
     {
         var repository = new FakeSnippetRepository
         {
-            ExceptionToThrow = new InvalidOperationException("database unavailable"),
+            Snippets = [MakeSnippet(1, "Alpha")],
+            ExceptionToThrow = failTags ? null : new InvalidOperationException("database unavailable"),
+            TagExceptionToThrow = failTags ? new InvalidOperationException("tags unavailable") : null,
         };
         var viewModel = new VaultViewModel(repository);
 
         await viewModel.InitializeAsync();
 
         Assert.Equal(VaultViewState.Error, viewModel.State);
+        Assert.True(viewModel.IsError);
+
+        var errorNotifications = new List<bool>();
+        viewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(viewModel.IsError)) errorNotifications.Add(viewModel.IsError);
+        };
+        repository.ExceptionToThrow = null;
+        repository.TagExceptionToThrow = null;
+        await viewModel.LoadCommand.ExecuteAsync(null);
+
+        Assert.True(viewModel.HasResults);
+        Assert.False(viewModel.IsError);
+        Assert.Contains(false, errorNotifications);
+        Assert.Equal("Alpha", Assert.Single(viewModel.Snippets).Title);
+    }
+
+    [Fact]
+    public async Task FavoritesOnly_ChangingTheFilterAloneRefreshesResults()
+    {
+        var repository = new FakeSnippetRepository
+        {
+            Snippets = [MakeSnippet(1, "Alpha", favorite: true), MakeSnippet(2, "Beta")],
+        };
+        var viewModel = new VaultViewModel(repository);
+        await viewModel.InitializeAsync();
+
+        viewModel.FavoritesOnly = true;
+        await Task.Delay(350);
+        Assert.True(repository.SearchCalls[^1].FavoritesOnly);
+        Assert.Equal("Alpha", Assert.Single(viewModel.Snippets).Title);
+
+        viewModel.FavoritesOnly = false;
+        await Task.Delay(350);
+        Assert.False(repository.SearchCalls[^1].FavoritesOnly);
+        Assert.Equal(2, viewModel.Snippets.Count);
+    }
+
+    [Fact]
+    public async Task DeferredSearchFailure_CanRetryThroughLoadCommand()
+    {
+        var repository = new FakeSnippetRepository { Snippets = [MakeSnippet(1, "Alpha")] };
+        var viewModel = new VaultViewModel(repository);
+        await viewModel.InitializeAsync();
+
+        repository.ExceptionToThrow = new InvalidOperationException("database unavailable");
+        viewModel.SearchQuery = "alpha";
+        await Task.Delay(350);
+        Assert.True(viewModel.IsError);
+
+        repository.ExceptionToThrow = null;
+        await viewModel.LoadCommand.ExecuteAsync(null);
+        Assert.True(viewModel.HasResults);
+        Assert.False(viewModel.IsError);
+        Assert.Equal("alpha", repository.SearchCalls[^1].Term);
+    }
+
+    [Fact]
+    public async Task CanceledInitialization_CanRetry()
+    {
+        var repository = new FakeSnippetRepository
+        {
+            ExceptionToThrow = new OperationCanceledException(),
+            Snippets = [MakeSnippet(1, "Alpha")],
+        };
+        var viewModel = new VaultViewModel(repository);
+        await viewModel.InitializeAsync();
+
+        repository.ExceptionToThrow = null;
+        await viewModel.InitializeAsync();
+        Assert.True(viewModel.HasResults);
     }
 }

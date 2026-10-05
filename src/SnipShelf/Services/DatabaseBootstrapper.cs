@@ -8,8 +8,7 @@ namespace SnipShelf.Services;
 /// </summary>
 public sealed class DatabaseBootstrapper(
     VaultDatabase database,
-    ISettingsService settings,
-    ISnippetRepository repository)
+    ISettingsService settings)
 {
     /// <summary>Bumped whenever the DDL in <see cref="SchemaSql"/> changes shape.</summary>
     public const int SchemaVersion = 1;
@@ -71,23 +70,40 @@ public sealed class DatabaseBootstrapper(
     }
 
     /// <summary>
-    /// Seeds once, guarded by the flag rather than by looking for the records: a user who
+    /// Seeds once, guarded by the database marker rather than by looking for the records: a user who
     /// deletes the Welcome snippet is not asking for it back.
     /// </summary>
     private async Task SeedFirstRunAsync(CancellationToken cancellationToken)
     {
-        if (settings.Current.SeedsInserted)
+        using var connection = database.OpenConnection();
+        using var transaction = connection.BeginTransaction();
+        using (var check = connection.CreateCommand())
         {
-            return;
+            check.Transaction = transaction;
+            check.CommandText = "SELECT Value FROM Meta WHERE Key = 'seeds_inserted';";
+            if (await check.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is "true")
+            {
+                return;
+            }
         }
 
-        foreach (var seed in FirstRunSeeds.All)
+        // Migrate the legacy settings flag so previously deleted seeds stay deleted.
+        if (!settings.Current.SeedsInserted)
         {
-            await repository.UpsertAsync(seed, cancellationToken).ConfigureAwait(false);
+            foreach (var seed in FirstRunSeeds.All)
+            {
+                await SqliteSnippetRepository.UpsertInTransactionAsync(
+                    connection, transaction, seed, TimeProvider.System, cancellationToken).ConfigureAwait(false);
+            }
         }
 
-        await settings.UpdateAsync(
-            current => current.SeedsInserted = true,
-            cancellationToken).ConfigureAwait(false);
+        using var marker = connection.CreateCommand();
+        marker.Transaction = transaction;
+        marker.CommandText = """
+            INSERT INTO Meta (Key, Value) VALUES ('seeds_inserted', 'true')
+            ON CONFLICT (Key) DO UPDATE SET Value = excluded.Value;
+            """;
+        await marker.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 }

@@ -9,6 +9,7 @@ public sealed class FakeSnippetRepository : ISnippetRepository
     public List<TagCount> TagCounts { get; set; } = [];
     public List<SearchCall> SearchCalls { get; } = [];
     public TimeSpan Delay { get; set; } = TimeSpan.Zero;
+    public Exception? TagExceptionToThrow { get; set; }
     public Exception? ExceptionToThrow { get; set; }
 
     public sealed record SearchCall(
@@ -91,6 +92,12 @@ public sealed class FakeSnippetRepository : ISnippetRepository
 
     public Task<IReadOnlyList<TagCount>> GetTagsWithCountsAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (TagExceptionToThrow is not null)
+        {
+            throw TagExceptionToThrow;
+        }
+
         return Task.FromResult<IReadOnlyList<TagCount>>(TagCounts.ToList());
     }
 }
