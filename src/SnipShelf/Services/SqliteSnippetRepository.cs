@@ -280,9 +280,10 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
             .ToList();
 
         var wantedIds = new List<long>();
+        var existingTags = await LoadTagsAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
         foreach (var name in wanted)
         {
-            wantedIds.Add(await GetOrCreateTagAsync(connection, transaction, name, cancellationToken).ConfigureAwait(false));
+            wantedIds.Add(await GetOrCreateTagAsync(connection, transaction, existingTags, name, cancellationToken).ConfigureAwait(false));
         }
 
         using (var clear = connection.CreateCommand())
@@ -318,32 +319,23 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
 
     /// <summary>
     /// Returns the id of the tag called <paramref name="name"/>, creating it when missing.
-    /// The lookup happens in C# with OrdinalIgnoreCase because SQLite NOCASE folds ASCII
-    /// only — under it, "CAFÉ" and "café" would become two rows. A lookup miss can never
-    /// trip the NOCASE unique index on insert either: ASCII folding is a subset of
-    /// OrdinalIgnoreCase folding, so NOCASE has no match whenever the lookup has none.
+    /// <paramref name="existingTags"/> is the transaction's shared tag lookup: loading it
+    /// happens in C# with OrdinalIgnoreCase because SQLite NOCASE folds ASCII only — under
+    /// it, "CAFÉ" and "café" would become two rows. A lookup miss can never trip the NOCASE
+    /// unique index on insert either: ASCII folding is a subset of OrdinalIgnoreCase
+    /// folding, so NOCASE has no match whenever the lookup has none. New tags are added to
+    /// the dictionary so the rest of the sync reuses them.
     /// </summary>
     private static async Task<long> GetOrCreateTagAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        Dictionary<string, long> existingTags,
         string name,
         CancellationToken cancellationToken)
     {
         name = name.Trim();
 
-        var existing = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-        using (var select = connection.CreateCommand())
-        {
-            select.Transaction = transaction;
-            select.CommandText = "SELECT Id, Name FROM Tags;";
-            using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                existing[reader.GetString(1)] = reader.GetInt64(0);
-            }
-        }
-
-        if (existing.TryGetValue(name, out var id))
+        if (existingTags.TryGetValue(name, out var id))
         {
             return id;
         }
@@ -359,7 +351,28 @@ public sealed class SqliteSnippetRepository(VaultDatabase database, TimeProvider
         using var rowId = connection.CreateCommand();
         rowId.Transaction = transaction;
         rowId.CommandText = "SELECT last_insert_rowid();";
-        return Convert.ToInt64(await rowId.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        id = Convert.ToInt64(await rowId.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        existingTags[name] = id;
+        return id;
+    }
+
+    /// <summary>Snapshot of the Tags table, keyed for Unicode-insensitive lookup.</summary>
+    private static async Task<Dictionary<string, long>> LoadTagsAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var existing = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        using var select = connection.CreateCommand();
+        select.Transaction = transaction;
+        select.CommandText = "SELECT Id, Name FROM Tags;";
+        using var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            existing[reader.GetString(1)] = reader.GetInt64(0);
+        }
+
+        return existing;
     }
 
     private static string Format(DateTimeOffset value) =>
