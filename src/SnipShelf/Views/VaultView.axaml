@@ -13,8 +13,9 @@
             <!-- Header & Search -->
             <StackPanel Grid.Row="0" Spacing="8" Margin="0,0,0,8">
                 <TextBlock Text="Vault" FontSize="22" FontWeight="SemiBold" />
-                <TextBox Text="{Binding SearchQuery, Mode=TwoWay}"
-                         Watermark="Search snippets, prompts, or tags…" />
+                <AutoCompleteBox Text="{Binding SearchQuery, Mode=TwoWay}"
+                                 Watermark="Search snippets, prompts, or tags…"
+                                 FilterMode="None" />
             </StackPanel>
 
             <!-- Filter Chips -->
