@@ -19,7 +19,7 @@ public sealed class TempVault : IDisposable
         Settings = new FakeSettingsService(new AppSettings { SeedsInserted = seedsAlreadyInserted });
         Database = new VaultDatabase(folder);
         Repository = new SqliteSnippetRepository(Database, Clock);
-        Bootstrapper = new DatabaseBootstrapper(Database, Settings, Repository);
+        Bootstrapper = new DatabaseBootstrapper(Database, Settings);
     }
 
     public string Folder { get; }

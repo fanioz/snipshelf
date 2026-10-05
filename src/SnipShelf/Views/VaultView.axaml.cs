@@ -20,6 +20,12 @@ public partial class VaultView : UserControl
         }
     }
 
+    /// <summary>
+    /// Cancels pending debounced searches and releases their cancellation resources
+    /// when the vault view leaves the visual tree.
+    /// </summary>
+    /// <param name="sender">The control that raised the unloaded event.</param>
+    /// <param name="e">The routed event arguments.</param>
     private void OnUnloaded(object? sender, RoutedEventArgs e)
     {
         if (DataContext is VaultViewModel viewModel)

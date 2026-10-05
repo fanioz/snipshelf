@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using FluentAvalonia.UI.Controls;
 using Microsoft.Extensions.DependencyInjection;
 using SnipShelf.Models;
@@ -29,7 +30,8 @@ public partial class App : Application
         // Theme must be decided before the first frame is drawn, so this is synchronous.
         var settings = services.GetRequiredService<ISettingsService>();
         ApplyTheme(settings.Load().Theme);
-        settings.Changed += (_, current) => ApplyTheme(current.Theme);
+        settings.Changed += (_, current) =>
+            Dispatcher.UIThread.Post(() => ApplyTheme(current.Theme));
 
         // The Vault is empty until the schema exists; blocking here keeps the first Vault
         // render from racing the data layer. It is milliseconds on a cold start and runs

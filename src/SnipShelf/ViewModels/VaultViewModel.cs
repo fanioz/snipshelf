@@ -31,6 +31,7 @@ public sealed partial class VaultViewModel : ViewModelBase
     public bool IsLoading => State == VaultViewState.Loading;
     public bool IsEmptyVault => State == VaultViewState.EmptyVault;
     public bool IsNoResults => State == VaultViewState.NoResults;
+    public bool IsError => State == VaultViewState.Error;
     public bool HasResults => State == VaultViewState.ShowingResults;
     public bool HasSelection => SelectedSnippet is not null;
     public string NoResultsText => string.IsNullOrWhiteSpace(SearchQuery)
@@ -89,6 +90,7 @@ public sealed partial class VaultViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
+            _isInitialized = false;
             // Navigation away; clean up gracefully.
         }
         catch
@@ -99,6 +101,12 @@ public sealed partial class VaultViewModel : ViewModelBase
 
     partial void OnStateChanged(VaultViewState value)
     {
+        if (value == VaultViewState.Error)
+        {
+            _isInitialized = false;
+        }
+
+        OnPropertyChanged(nameof(IsError));
         OnPropertyChanged(nameof(IsLoading));
         OnPropertyChanged(nameof(IsEmptyVault));
         OnPropertyChanged(nameof(IsNoResults));
@@ -134,6 +142,8 @@ public sealed partial class VaultViewModel : ViewModelBase
 
         DeferredSearch();
     }
+
+    partial void OnFavoritesOnlyChanged(bool value) => DeferredSearch();
 
     partial void OnSortModeChanged(SortMode value) => DeferredSearch();
 
@@ -216,7 +226,7 @@ public sealed partial class VaultViewModel : ViewModelBase
         }
         catch (OperationCanceledException)
         {
-            // Stale result; drop it.
+            throw; // Let initialization reset its guard, or the debounce discard a stale result.
         }
         catch
         {
