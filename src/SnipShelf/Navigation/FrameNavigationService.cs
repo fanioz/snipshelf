@@ -75,7 +75,9 @@ public sealed class FrameNavigationService : INavigationService, INavigationPage
             return null;
         }
 
-        var view = CreateView(definition.ViewModelType, definition.ViewType);
+        // The view model is supplied, so only the view is built here; resolving one from
+        // DI would run a constructor whose result is immediately discarded.
+        var view = (Control)Activator.CreateInstance(definition.ViewType)!;
         view.DataContext = viewModel;
         return view;
     }
